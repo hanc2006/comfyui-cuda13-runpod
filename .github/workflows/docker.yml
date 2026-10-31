@@ -1,0 +1,65 @@
+name: Build and push image
+
+# Builds the image on GitHub's runners and pushes it to Docker Hub.
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   DOCKERHUB_USERNAME  your Docker Hub user name
+#   DOCKERHUB_TOKEN     a Docker Hub access token (Account settings -> Personal access tokens)
+# Optional repository variable IMAGE_NAME (default: comfyui-cuda13).
+
+on:
+  push:
+    branches: [main]
+    paths: [Dockerfile, entrypoint.sh, .github/workflows/docker.yml]
+  workflow_dispatch:
+    inputs:
+      torch_version:
+        description: "Pin torch/torchaudio (e.g. 2.11.0). Empty = newest on the cu130 index"
+        required: false
+        default: ""
+      comfy_ref:
+        description: "ComfyUI branch or tag"
+        required: false
+        default: "master"
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      # The image is ~10 GB; the runner needs room for build layers.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Image name and tags
+        id: meta
+        run: |
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME || 'comfyui-cuda13' }}"
+          echo "tags=${IMAGE}:latest,${IMAGE}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            TORCH_VERSION=${{ github.event.inputs.torch_version || '' }}
+            COMFY_REF=${{ github.event.inputs.comfy_ref || 'master' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
