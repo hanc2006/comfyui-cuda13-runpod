@@ -40,6 +40,19 @@ first start after adding packs is slow, later starts are fast. Install log:
 | `LLAMA_ARGS` | – | extra flags, e.g. `--mmproj /workspace/models/llm/mmproj.gguf --api-key <secret>` |
 | `PUBLIC_KEY` | set by RunPod | SSH key for `root` (password login is disabled) |
 
+## Restarting ComfyUI
+
+ComfyUI runs as a supervised child process: stopping or crashing it does **not** stop the
+container, so SSH, File Browser and llama-server keep running. From a pod shell:
+
+| Command | Effect |
+|---|---|
+| `comfyui-restart` | restart ComfyUI (e.g. after adding node packs) |
+| `comfyui-stop` | stop it and keep it stopped, e.g. to run `python3 /opt/ComfyUI/main.py` by hand |
+| `comfyui-start` | let it start again after `comfyui-stop` |
+
+If ComfyUI crashes, it is restarted automatically after 3 seconds.
+
 ## File Browser
 
 A web file manager for the whole volume (`/workspace`) on port 8080, for uploading models,

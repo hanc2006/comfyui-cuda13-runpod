@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Container start: SSH -> volume layout -> node-pack deps -> File Browser -> llama-server -> ComfyUI.
+# Container start: SSH -> volume layout -> node-pack deps -> File Browser -> llama-server -> ComfyUI (supervised).
 #
 # Env options:
 #   COMFY_BASE        ComfyUI data on the volume: custom_nodes, input, output, user
@@ -95,7 +95,31 @@ if is_on "${LLAMA_ENABLED:-false}"; then
   fi
 fi
 
-# ---- ComfyUI ----
+# ---- ComfyUI, supervised ----
+# This script stays the container's main process and runs ComfyUI as a child, so
+# stopping/crashing ComfyUI no longer stops the container (SSH, File Browser and
+# llama-server keep running). Commands inside the pod:
+#   comfyui-restart   restart ComfyUI
+#   comfyui-stop      stop it and keep it stopped (e.g. to run it by hand)
+#   comfyui-start     let the supervisor start it again
+STOP_FILE=/tmp/comfyui.stop
+rm -f "$STOP_FILE"
+CHILD=0
+on_term() { [ "$CHILD" -gt 0 ] && kill -TERM "$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; exit 0; }
+trap on_term TERM INT
+
 cd /opt/ComfyUI
-# shellcheck disable=SC2086  # COMFY_ARGS is intentionally word-split
-exec python3 main.py --listen 0.0.0.0 --port 8188 --base-directory "$BASE" --models-directory "$MODELS" ${COMFY_ARGS:-}
+while true; do
+  if [ -f "$STOP_FILE" ]; then sleep 2 & wait $!; continue; fi
+  # shellcheck disable=SC2086  # COMFY_ARGS is intentionally word-split
+  python3 main.py --listen 0.0.0.0 --port 8188 --base-directory "$BASE" --models-directory "$MODELS" ${COMFY_ARGS:-} &
+  CHILD=$!
+  RC=0; wait "$CHILD" || RC=$?
+  CHILD=0
+  if [ -f "$STOP_FILE" ]; then
+    echo "[entrypoint] ComfyUI stopped (exit $RC) - run comfyui-start to start it again"
+  else
+    echo "[entrypoint] ComfyUI exited (code $RC) - restarting in 3 s"
+    sleep 3 & wait $!
+  fi
+done

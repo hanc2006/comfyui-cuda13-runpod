@@ -81,7 +81,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # git: node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | libgomp1: llama
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git python3 python3-pip python3-dev build-essential \
-      ffmpeg libgl1 libglib2.0-0 libgomp1 openssh-server procps tmux \
+      ffmpeg libgl1 libglib2.0-0 libgomp1 openssh-server procps tmux tini \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /usr/lib/python3*/EXTERNALLY-MANAGED \
  && ln -sf /usr/bin/python3 /usr/local/bin/python \
@@ -108,7 +108,14 @@ RUN python3 --version \
  && { LD_LIBRARY_PATH=/opt/llama ldd /opt/llama/llama-server /opt/llama/*.so* 2>/dev/null | grep 'not found' | grep -v 'libcuda\.so' | sort -u \
       | sed 's/^/WARNING llama-server missing: /' || true; }
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
+# Helper commands for the supervised ComfyUI process (see entrypoint.sh).
+# The pattern is anchored so it only matches ComfyUI itself, never a shell that mentions it.
+RUN printf '%s\n' '#!/bin/sh' 'pkill -f "^python3 main.py --listen" && echo "ComfyUI restarting"' > /usr/local/bin/comfyui-restart \
+ && printf '%s\n' '#!/bin/sh' 'touch /tmp/comfyui.stop' 'pkill -f "^python3 main.py --listen"' 'echo "ComfyUI stopped (comfyui-start to start it again)"' > /usr/local/bin/comfyui-stop \
+ && printf '%s\n' '#!/bin/sh' 'rm -f /tmp/comfyui.stop' 'echo "ComfyUI starting"' > /usr/local/bin/comfyui-start \
+ && chmod 755 /usr/local/bin/comfyui-restart /usr/local/bin/comfyui-stop /usr/local/bin/comfyui-start
 
 WORKDIR /opt/ComfyUI
 EXPOSE 22 8080 8188 8089
-ENTRYPOINT ["/entrypoint.sh"]
+# tini as PID 1: forwards stop signals and reaps exited child processes
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.sh"]
