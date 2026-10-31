@@ -31,14 +31,16 @@ ARG FILEBROWSER_VERSION=v2.63.23
 FROM ${LLAMA_IMAGE} AS llama
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # /app holds llama-server and its ggml/llama libs (incl. the CUDA backend it loads at run
-# time from its own folder). Add exactly the CUDA runtime libs those link to (cudart,
-# cuBLAS, ...). libcuda.so.1 is the host driver and is not copied.
+# time from its own folder). Add the NVIDIA libs those link to, wherever the image keeps
+# them: cudart/cuBLAS/nvrtc... under /usr/local/cuda, NCCL (llama.cpp links it by default,
+# GGML_CUDA_NCCL=ON) under /usr/lib. libcuda.so.1 is the host driver and is not copied.
 RUN mkdir -p /out \
  && cp -a /app/. /out/ \
  && LD_LIBRARY_PATH=/app ldd /app/llama-server /app/*.so* \
-      | grep -oE '/usr/local/cuda[^ ]+\.so[^ ]*' | grep -v stubs | sort -u \
-      | xargs -r -I{} cp -L {} /out/ \
- && ls -la /out
+      | grep -oE '=> /[^ ]+' | cut -c4- | grep -v stubs \
+      | grep -E '/lib(cudart|cublas|cublasLt|cufft|curand|cusolver|cusparse|nvrtc|nvJitLink|nvjitlink|nccl)[^/]*\.so[^/]*$' \
+      | sort -u | tee /tmp/nvlibs.txt | xargs -r -I{} cp -L {} /out/ \
+ && echo "NVIDIA libs copied:" && cat /tmp/nvlibs.txt
 
 ########## Stage 2: build Python packages + ComfyUI (same Debian/Python as runtime) ##########
 FROM debian:13-slim AS builder
@@ -106,7 +108,8 @@ COPY --from=llama /out/ /opt/llama/
 RUN echo /opt/llama > /etc/ld.so.conf.d/llama.conf && ldconfig \
  && python3 --version \
  # every lib llama-server needs must resolve, except the host driver's libcuda.so.1
- && ! ldd /opt/llama/llama-server /opt/llama/*.so* | grep 'not found' | grep -v 'libcuda.so'
+ && MISSING="$(ldd /opt/llama/llama-server /opt/llama/*.so* 2>/dev/null | grep 'not found' | grep -v 'libcuda\.so' | sort -u || true)" \
+ && if [ -n "$MISSING" ]; then echo "llama-server: missing libraries:"; echo "$MISSING"; exit 1; fi
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 WORKDIR /opt/ComfyUI
