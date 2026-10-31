@@ -36,19 +36,6 @@ first start after adding packs is slow, later starts are fast. Install log:
 | `LLAMA_ARGS` | – | extra flags, e.g. `--mmproj /workspace/models/llm/mmproj.gguf --api-key <secret>` |
 | `PUBLIC_KEY` | set by RunPod | SSH key for `root` (password login is disabled) |
 
-`llama-server` exposes an OpenAI-compatible API at `http://127.0.0.1:8089/v1` inside the pod.
-Expose `8089/http` only if you need it from outside, and then set `--api-key`.
-
-## Extra services
-
-If `/workspace/autostart.sh` exists, it runs in the background before ComfyUI starts
-(log: `/workspace/autostart.log`). Example — serve a built web UI on port 8774:
-
-```bash
-#!/usr/bin/env bash
-cd /workspace/AI-ONE-STUDIO/dist && exec python -m http.server 8774 --bind 0.0.0.0
-```
-
 ## RunPod template
 
 - **Image:** `<dockerhub-user>/comfyui-cuda13:latest`
