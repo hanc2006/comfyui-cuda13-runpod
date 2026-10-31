@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Clean ComfyUI base image for RunPod — multi-stage, Debian 13 slim, Python 3.13, CUDA 13.
 # CUDA comes from PyTorch's own libs and the llama.cpp image's libs; the base has none.
-#  - Image (/opt): PyTorch, ComfyUI, seed copy of ComfyUI-Manager, llama-server,
-#    File Browser, SSH.
+#  - Image (/opt): PyTorch, ComfyUI, llama-server, File Browser, SSH.
 #  - Volume: /workspace/models = models only (--models-directory);
 #    /workspace/ComfyUI = custom_nodes, input, output, user (--base-directory).
 #    Node-pack Python deps go to /workspace/.python (pip --user), so they survive
@@ -24,30 +23,27 @@ ARG LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda13
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=
 ARG COMFY_REF=master
-ARG MANAGER_REF=main
 ARG FILEBROWSER_VERSION=v2.63.23
 
-########## Stage 1: take llama-server from the official CUDA 13 image ##########
+########## Stage 1: llama-server from the official CUDA 13 image ##########
 FROM ${LLAMA_IMAGE} AS llama
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-# /app holds llama-server and its ggml/llama libs (incl. the CUDA backend it loads at run
-# time from its own folder). Add the NVIDIA libs those link to, wherever the image keeps
-# them: cudart/cuBLAS/nvrtc... under /usr/local/cuda, NCCL (llama.cpp links it by default,
-# GGML_CUDA_NCCL=ON) under /usr/lib. libcuda.so.1 is the host driver and is not copied.
-RUN mkdir -p /out \
- && cp -a /app/. /out/ \
+# The image lays llama-server and its ggml/llama *.so out flat under /app; that folder is
+# copied as-is below. A Debian base has no CUDA libs, so also collect the NVIDIA runtime
+# libs /app links to (cudart, cuBLAS, NCCL, ...), wherever this image keeps them.
+# libcuda.so.1 is the host driver (RunPod provides it) and is not copied.
+RUN mkdir -p /nvlibs \
  && LD_LIBRARY_PATH=/app ldd /app/llama-server /app/*.so* \
       | grep -oE '=> /[^ ]+' | cut -c4- | grep -v stubs \
       | grep -E '/lib(cudart|cublas|cublasLt|cufft|curand|cusolver|cusparse|nvrtc|nvJitLink|nvjitlink|nccl)[^/]*\.so[^/]*$' \
-      | sort -u | tee /tmp/nvlibs.txt | xargs -r -I{} cp -L {} /out/ \
- && echo "NVIDIA libs copied:" && cat /tmp/nvlibs.txt
+      | sort -u | xargs -r -I{} cp -L {} /nvlibs/ \
+ && ls /nvlibs
 
 ########## Stage 2: build Python packages + ComfyUI (same Debian/Python as runtime) ##########
 FROM debian:13-slim AS builder
 ARG TORCH_INDEX
 ARG TORCH_VERSION
 ARG COMFY_REF
-ARG MANAGER_REF
 ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -67,8 +63,6 @@ ENV PIP_CONSTRAINT=/opt/torch-constraints.txt
 RUN git clone --depth 1 --branch "${COMFY_REF}" https://github.com/comfyanonymous/ComfyUI /opt/ComfyUI \
  && grep -viE '^(torch|torchvision|torchaudio)([<>=~! ]|$)' /opt/ComfyUI/requirements.txt > /tmp/req.txt \
  && python3 -m pip install -r /tmp/req.txt \
- && git clone --depth 1 --branch "${MANAGER_REF}" https://github.com/Comfy-Org/ComfyUI-Manager /opt/seed/ComfyUI-Manager \
- && python3 -m pip install -r /opt/seed/ComfyUI-Manager/requirements.txt \
  && find /usr/local/lib/python3* /opt -name '__pycache__' -prune -exec rm -rf {} +
 
 ########## Stage 3: runtime ##########
@@ -84,7 +78,7 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # python3-dev + build-essential stay: node packs on the volume can compile wheels at boot.
-# git: Manager/node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | libgomp1: llama
+# git: node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | libgomp1: llama
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git python3 python3-pip python3-dev build-essential \
       ffmpeg libgl1 libglib2.0-0 libgomp1 openssh-server procps tmux \
@@ -103,13 +97,16 @@ RUN curl -fsSL "https://github.com/filebrowser/filebrowser/releases/download/${F
 COPY --from=builder /usr/local/lib /usr/local/lib
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /opt /opt
-# llama-server stays in one folder with its libs: it loads its CUDA backend from there
-COPY --from=llama /out/ /opt/llama/
-RUN echo /opt/llama > /etc/ld.so.conf.d/llama.conf && ldconfig \
- && python3 --version \
- # every lib llama-server needs must resolve, except the host driver's libcuda.so.1
- && MISSING="$(ldd /opt/llama/llama-server /opt/llama/*.so* 2>/dev/null | grep 'not found' | grep -v 'libcuda\.so' | sort -u || true)" \
- && if [ -n "$MISSING" ]; then echo "llama-server: missing libraries:"; echo "$MISSING"; exit 1; fi
+# llama-server: the official image's /app as-is (binary + ggml/llama libs, flat), plus the
+# NVIDIA libs collected in stage 1. LD_LIBRARY_PATH=/opt/llama is set only for the
+# llama-server process (entrypoint.sh), so these libs never shadow PyTorch's own CUDA libs.
+COPY --from=llama /app/ /opt/llama/
+COPY --from=llama /nvlibs/ /opt/llama/
+# Report (don't fail on) any library llama-server still can't resolve; libcuda.so.1 is
+# expected to be missing at build time - the host driver provides it on the pod.
+RUN python3 --version \
+ && { LD_LIBRARY_PATH=/opt/llama ldd /opt/llama/llama-server /opt/llama/*.so* 2>/dev/null | grep 'not found' | grep -v 'libcuda\.so' | sort -u \
+      | sed 's/^/WARNING llama-server missing: /' || true; }
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 WORKDIR /opt/ComfyUI

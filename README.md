@@ -11,7 +11,7 @@ generic and the data survives pod restarts.
 | Path | Where | Contents |
 |---|---|---|
 | `/opt/ComfyUI` | image | ComfyUI code |
-| `/opt/llama` | image | `llama-server` + the CUDA libs it needs |
+| `/opt/llama` | image | `llama-server` with its libs (the official `server-cuda13` image's `/app`) + the NVIDIA libs it links to |
 | `/usr/local/bin/filebrowser` | image | File Browser |
 | `/workspace/models` | volume | **models only** (`checkpoints`, `loras`, `vae`, `diffusion_models`, `text_encoders`, …) |
 | `/workspace/ComfyUI` | volume | `custom_nodes`, `input`, `output`, `user` |
@@ -19,8 +19,8 @@ generic and the data survives pod restarts.
 | `/workspace/.filebrowser` | volume | File Browser settings, users and log |
 
 On every start the entrypoint creates any missing standard model folders (existing files are
-never touched), copies ComfyUI-Manager into `custom_nodes` if it is not there, and installs
-the node packs' `requirements.txt` into `/workspace/.python` **only when they changed** — the
+never touched) and installs the node packs' `requirements.txt` into `/workspace/.python`
+**only when they changed** — the
 first start after adding packs is slow, later starts are fast. Install log:
 `/workspace/.python/node-deps.log`.
 
@@ -96,5 +96,4 @@ docker buildx build --platform linux/amd64 -t <dockerhub-user>/comfyui-cuda13:la
 | `TORCH_INDEX` | `https://download.pytorch.org/whl/cu130` | PyTorch wheel index |
 | `TORCH_VERSION` | empty (newest) | pin torch + torchaudio, e.g. `2.11.0` |
 | `COMFY_REF` | `master` | ComfyUI branch or tag |
-| `MANAGER_REF` | `main` | ComfyUI-Manager branch or tag |
 | `FILEBROWSER_VERSION` | `v2.63.23` | File Browser release |

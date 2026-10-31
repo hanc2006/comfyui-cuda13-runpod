@@ -32,7 +32,6 @@ mkdir -p "$BASE"/{custom_nodes,input,output,user} "$MODELS" "$PYTHONUSERBASE"
 # Standard model folders (checkpoints, loras, vae, ...) from ComfyUI's own layout;
 # existing folders and files are never touched. Node packs add their own (SEEDVR2, ...).
 (cd /opt/ComfyUI/models && find . -mindepth 1 -type d -print0) | (cd "$MODELS" && xargs -0 -r mkdir -p)
-[ -d "$BASE/custom_nodes/ComfyUI-Manager" ] || cp -r /opt/seed/ComfyUI-Manager "$BASE/custom_nodes/"
 
 # ---- Python deps of volume node packs -> $PYTHONUSERBASE (persists on the volume) ----
 # Re-run only when the set of requirements files changes, so normal boots are fast.
@@ -90,7 +89,7 @@ if is_on "${LLAMA_ENABLED:-false}"; then
            LLAMA_ARG_N_GPU_LAYERS="${LLAMA_ARG_N_GPU_LAYERS:-999}"
     echo "[entrypoint] llama-server: $LLAMA_ARG_MODEL on :$LLAMA_ARG_PORT (log /workspace/llama-server.log)"
     # shellcheck disable=SC2086  # LLAMA_ARGS is intentionally word-split
-    llama-server ${LLAMA_ARGS:-} > /workspace/llama-server.log 2>&1 &
+    LD_LIBRARY_PATH=/opt/llama llama-server ${LLAMA_ARGS:-} > /workspace/llama-server.log 2>&1 &
   else
     echo "[entrypoint] LLAMA_ARG_MODEL=$LLAMA_ARG_MODEL not found - llama-server not started"
   fi
