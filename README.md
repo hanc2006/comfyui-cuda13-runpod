@@ -70,10 +70,13 @@ cp -rn /workspace/ComfyUI/models/. /workspace/models/ && rm -rf /workspace/Comfy
 ## Build
 
 Pushing to `main` builds and pushes the image with GitHub Actions
-(`.github/workflows/docker.yml`). Set these repository secrets first:
+(`.github/workflows/docker.yml`). In **Settings → Secrets and variables → Actions** set:
 
-- `DOCKERHUB_USERNAME` – your Docker Hub user
-- `DOCKERHUB_TOKEN` – a Docker Hub access token
+- Secret `DOCKERHUB_USERNAME` – login name (Docker ID or email)
+- Secret `DOCKERHUB_TOKEN` – a Docker Hub access token with Read & Write access
+- Variable `DOCKERHUB_NAMESPACE` – your Docker ID (lowercase, no `@`); the image is pushed as
+  `<DOCKERHUB_NAMESPACE>/comfyui-cuda13`. Required if the login name is an email.
+- Variable `IMAGE_NAME` – optional, default `comfyui-cuda13`
 
 Tags pushed: `latest` and the short commit SHA. The workflow can also be started by hand
 (**Actions → Build and push image → Run workflow**) with an optional torch version pin and

@@ -1,10 +1,15 @@
 name: Build and push image
 
 # Builds the image on GitHub's runners and pushes it to Docker Hub.
-# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
-#   DOCKERHUB_USERNAME  your Docker Hub user name
-#   DOCKERHUB_TOKEN     a Docker Hub access token (Account settings -> Personal access tokens)
-# Optional repository variable IMAGE_NAME (default: comfyui-cuda13).
+# Settings -> Secrets and variables -> Actions:
+#   Secrets:
+#     DOCKERHUB_USERNAME   login name (Docker ID or email)
+#     DOCKERHUB_TOKEN      Docker Hub access token with Read & Write access
+#   Variables:
+#     DOCKERHUB_NAMESPACE  your Docker ID (lowercase, no @) - the image becomes
+#                          <DOCKERHUB_NAMESPACE>/<IMAGE_NAME>. Needed when the login
+#                          name is an email; otherwise the login name is used.
+#     IMAGE_NAME           optional, default comfyui-cuda13
 
 on:
   push:
@@ -48,8 +53,17 @@ jobs:
 
       - name: Image name and tags
         id: meta
+        env:
+          NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
+          NAME: ${{ vars.IMAGE_NAME || 'comfyui-cuda13' }}
         run: |
-          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME || 'comfyui-cuda13' }}"
+          NAMESPACE="$(echo "$NAMESPACE" | tr '[:upper:]' '[:lower:]' | xargs)"
+          if ! [[ "$NAMESPACE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "::error::Image namespace is not a valid Docker ID (an email or other invalid characters). Set the repository variable DOCKERHUB_NAMESPACE to your Docker ID."
+            exit 1
+          fi
+          IMAGE="${NAMESPACE}/${NAME}"
+          echo "Image: ${IMAGE}"
           echo "tags=${IMAGE}:latest,${IMAGE}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
