@@ -98,12 +98,14 @@ fi
 # ---- ComfyUI, supervised ----
 # This script stays the container's main process and runs ComfyUI as a child, so
 # stopping/crashing ComfyUI no longer stops the container (SSH, File Browser and
-# llama-server keep running). Commands inside the pod:
-#   comfyui-restart   restart ComfyUI
-#   comfyui-stop      stop it and keep it stopped (e.g. to run it by hand)
-#   comfyui-start     let the supervisor start it again
-STOP_FILE=/tmp/comfyui.stop
-rm -f "$STOP_FILE"
+# llama-server keep running). ComfyUI is NOT restarted automatically: when it exits
+# it stays stopped until one of these commands is run inside the pod:
+#   comfyui-start     start it again
+#   comfyui-restart   stop it and start it again right away
+#   comfyui-stop      stop it (e.g. to run it by hand)
+STOP_FILE=/tmp/comfyui.stop          # present = stay stopped
+RESTART_FILE=/tmp/comfyui.restart    # present = start again right after exiting
+rm -f "$STOP_FILE" "$RESTART_FILE"
 CHILD=0
 on_term() { [ "$CHILD" -gt 0 ] && kill -TERM "$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; exit 0; }
 trap on_term TERM INT
@@ -116,10 +118,11 @@ while true; do
   CHILD=$!
   RC=0; wait "$CHILD" || RC=$?
   CHILD=0
-  if [ -f "$STOP_FILE" ]; then
-    echo "[entrypoint] ComfyUI stopped (exit $RC) - run comfyui-start to start it again"
+  if [ -f "$RESTART_FILE" ]; then
+    rm -f "$RESTART_FILE" "$STOP_FILE"
+    echo "[entrypoint] ComfyUI restarting"
   else
-    echo "[entrypoint] ComfyUI exited (code $RC) - restarting in 3 s"
-    sleep 3 & wait $!
+    touch "$STOP_FILE"
+    echo "[entrypoint] ComfyUI exited (code $RC) and stays stopped - run comfyui-start to start it"
   fi
 done
