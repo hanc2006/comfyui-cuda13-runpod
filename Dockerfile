@@ -1,17 +1,18 @@
 # syntax=docker/dockerfile:1.7
 # Clean ComfyUI base image for RunPod — multi-stage, Debian 13 slim, Python 3.13, CUDA 13.
 # CUDA comes from PyTorch's own libs and the llama.cpp image's libs; the base has none.
-#  - Image (/opt): PyTorch, ComfyUI, seed copy of ComfyUI-Manager, llama-server, SSH.
+#  - Image (/opt): PyTorch, ComfyUI, seed copy of ComfyUI-Manager, llama-server,
+#    File Browser, SSH.
 #  - Volume: /workspace/models = models only (--models-directory);
 #    /workspace/ComfyUI = custom_nodes, input, output, user (--base-directory).
 #    Node-pack Python deps go to /workspace/.python (pip --user), so they survive
-#    restarts. /workspace/autostart.sh (if present) starts extra services.
+#    restarts. File Browser (:8080, login required) manages /workspace.
 #
 # Build: docker build --platform linux/amd64 -t <you>/comfyui-cuda13:1 .
-# Pod:   network volume at /workspace; expose 8188/http, 22/tcp (+ your autostart ports).
+# Pod:   network volume at /workspace; expose 8188/http, 8080/http, 22/tcp (+ 8089/http for llama).
 #        Host driver must be CUDA 13.x (nvidia-smi). PyTorch is cu130; llama-server's
 #        libs are 13.4 and rely on CUDA 13 minor-version compatibility on 13.0-13.3 drivers.
-#        llama-server (port 8089) starts only with LLAMA_ENABLED=true + LLAMA_ARG_MODEL.
+#        llama-server (port 8089) is off by default: LLAMA_ENABLED=true + LLAMA_ARG_MODEL.
 
 # Official llama.cpp server image built for CUDA 13 (13.4.1 per llama.cpp's
 # .github/workflows/docker.yml). Its binaries + the CUDA libs they link to are copied
@@ -24,6 +25,7 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=
 ARG COMFY_REF=master
 ARG MANAGER_REF=main
+ARG FILEBROWSER_VERSION=v2.63.23
 
 ########## Stage 1: take llama-server from the official CUDA 13 image ##########
 FROM ${LLAMA_IMAGE} AS llama
@@ -69,6 +71,7 @@ RUN git clone --depth 1 --branch "${COMFY_REF}" https://github.com/comfyanonymou
 
 ########## Stage 3: runtime ##########
 FROM debian:13-slim
+ARG FILEBROWSER_VERSION
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
     PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore \
     PIP_CONSTRAINT=/opt/torch-constraints.txt \
@@ -89,6 +92,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -f /etc/ssh/ssh_host_* \
  && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/; s/^#\?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 
+# File Browser: single static binary from its GitHub release
+RUN curl -fsSL "https://github.com/filebrowser/filebrowser/releases/download/${FILEBROWSER_VERSION}/linux-amd64-filebrowser.tar.gz" \
+      | tar -xz -C /usr/local/bin filebrowser \
+ && filebrowser version
+
 # pip installs as root land in /usr/local on Debian — copy exactly that over
 COPY --from=builder /usr/local/lib /usr/local/lib
 COPY --from=builder /usr/local/bin /usr/local/bin
@@ -102,5 +110,5 @@ RUN echo /opt/llama > /etc/ld.so.conf.d/llama.conf && ldconfig \
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 WORKDIR /opt/ComfyUI
-EXPOSE 22 8188 8089
+EXPOSE 22 8080 8188 8089
 ENTRYPOINT ["/entrypoint.sh"]

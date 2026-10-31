@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Container start: SSH -> volume layout -> node-pack deps -> llama-server -> autostart hook -> ComfyUI.
+# Container start: SSH -> volume layout -> node-pack deps -> File Browser -> llama-server -> ComfyUI.
 #
 # Env options:
 #   COMFY_BASE        ComfyUI data on the volume: custom_nodes, input, output, user
 #                     (default /workspace/ComfyUI)
 #   COMFY_MODELS      models only, kept apart from everything else (default /workspace/models)
-#   COMFY_CORS_PORT   e.g. 8774 -> allow https://<pod>-8774.proxy.runpod.net to call ComfyUI
 #   COMFY_ARGS        extra ComfyUI flags, e.g. "--highvram"
 #   SKIP_NODE_DEPS=1  skip the requirements check for volume node packs
-#   LLAMA_ENABLED     1/true/yes/on -> start llama-server (default: off)
+#   FILEBROWSER_ENABLED   true (default) / false -> File Browser on :8080, root /workspace
+#   FILEBROWSER_PASSWORD  admin password (min 12 chars). Unset: one is generated on first
+#                         start and saved in /workspace/.filebrowser/admin-password.txt
+#   LLAMA_ENABLED     1/true/yes/on -> start llama-server (default: off, not started)
 #   LLAMA_ARG_MODEL   path to the .gguf llama-server loads (required when enabled; API on :8089)
 #   LLAMA_ARG_*       any other llama-server option as env, e.g. LLAMA_ARG_CTX_SIZE=8192
 #   LLAMA_ARGS        extra llama-server flags, e.g. "--mmproj /workspace/models/llm/mmproj.gguf"
@@ -56,9 +58,31 @@ if [ "${SKIP_NODE_DEPS:-0}" != 1 ]; then
   fi
 fi
 
+# ---- File Browser (web file manager for /workspace, login required) ----
+is_on() { case "${1:-}" in 1|true|TRUE|True|yes|YES|on|ON) return 0 ;; *) return 1 ;; esac; }
+if is_on "${FILEBROWSER_ENABLED:-true}"; then
+  FB_DIR=/workspace/.filebrowser; FB_DB="$FB_DIR/filebrowser.db"; FB_PWFILE="$FB_DIR/admin-password.txt"
+  mkdir -p "$FB_DIR" && chmod 700 "$FB_DIR"
+  fb() { filebrowser -d "$FB_DB" "$@" >/dev/null 2>&1; }
+  if [ ! -f "$FB_DB" ]; then
+    PW="${FILEBROWSER_PASSWORD:-$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)}"
+    fb config init && fb users add admin "$PW" --perm.admin \
+      || { echo "[entrypoint] File Browser setup failed (password must be 12+ chars)"; rm -f "$FB_DB"; }
+    [ -z "${FILEBROWSER_PASSWORD:-}" ] && [ -f "$FB_DB" ] && { umask 077; echo "$PW" > "$FB_PWFILE"; \
+      echo "[entrypoint] File Browser admin password generated: see $FB_PWFILE"; }
+  elif [ -n "${FILEBROWSER_PASSWORD:-}" ]; then
+    fb users update admin --password "$FILEBROWSER_PASSWORD" && rm -f "$FB_PWFILE" \
+      || echo "[entrypoint] FILEBROWSER_PASSWORD not applied (must be 12+ chars)"
+  fi
+  if [ -f "$FB_DB" ]; then
+    fb config set --address 0.0.0.0 --port 8080 --root /workspace
+    echo "[entrypoint] File Browser on :8080 (user admin)"
+    filebrowser -d "$FB_DB" > /workspace/.filebrowser/filebrowser.log 2>&1 &
+  fi
+fi
+
 # ---- Optional llama-server (shares the GPU with ComfyUI) ----
-case "${LLAMA_ENABLED:-0}" in 1|true|TRUE|True|yes|YES|on|ON) LLAMA_ON=1 ;; *) LLAMA_ON=0 ;; esac
-if [ "$LLAMA_ON" = 1 ]; then
+if is_on "${LLAMA_ENABLED:-false}"; then
   if [ -z "${LLAMA_ARG_MODEL:-}" ]; then
     echo "[entrypoint] LLAMA_ENABLED is on but LLAMA_ARG_MODEL is empty - llama-server not started"
   elif [ -f "$LLAMA_ARG_MODEL" ]; then
@@ -72,17 +96,7 @@ if [ "$LLAMA_ON" = 1 ]; then
   fi
 fi
 
-# ---- Optional hook: start other services kept on the volume ----
-if [ -f /workspace/autostart.sh ]; then
-  echo "[entrypoint] running /workspace/autostart.sh"
-  bash /workspace/autostart.sh > /workspace/autostart.log 2>&1 &
-fi
-
 # ---- ComfyUI ----
-CORS=()
-if [ -n "${COMFY_CORS_PORT:-}" ] && [ -n "${RUNPOD_POD_ID:-}" ]; then
-  CORS=(--enable-cors-header "https://${RUNPOD_POD_ID}-${COMFY_CORS_PORT}.proxy.runpod.net")
-fi
 cd /opt/ComfyUI
 # shellcheck disable=SC2086  # COMFY_ARGS is intentionally word-split
-exec python3 main.py --listen 0.0.0.0 --port 8188 --base-directory "$BASE" --models-directory "$MODELS" "${CORS[@]}" ${COMFY_ARGS:-}
+exec python3 main.py --listen 0.0.0.0 --port 8188 --base-directory "$BASE" --models-directory "$MODELS" ${COMFY_ARGS:-}
