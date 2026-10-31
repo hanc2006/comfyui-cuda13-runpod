@@ -5,10 +5,11 @@ name: Build and push image
 #   Secrets:
 #     DOCKERHUB_USERNAME   login name (Docker ID or email)
 #     DOCKERHUB_TOKEN      Docker Hub access token with Read & Write access
-#   Variables:
+#   Variable (or secret):
 #     DOCKERHUB_NAMESPACE  your Docker ID (lowercase, no @) - the image becomes
 #                          <DOCKERHUB_NAMESPACE>/<IMAGE_NAME>. Needed when the login
 #                          name is an email; otherwise the login name is used.
+#   Variable:
 #     IMAGE_NAME           optional, default comfyui-cuda13
 
 on:
@@ -54,7 +55,7 @@ jobs:
       - name: Image name and tags
         id: meta
         env:
-          NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
+          NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
           NAME: ${{ vars.IMAGE_NAME || 'comfyui-cuda13' }}
         run: |
           NAMESPACE="$(echo "$NAMESPACE" | tr '[:upper:]' '[:lower:]' | xargs)"

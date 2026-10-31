@@ -74,7 +74,7 @@ Pushing to `main` builds and pushes the image with GitHub Actions
 
 - Secret `DOCKERHUB_USERNAME` – login name (Docker ID or email)
 - Secret `DOCKERHUB_TOKEN` – a Docker Hub access token with Read & Write access
-- Variable `DOCKERHUB_NAMESPACE` – your Docker ID (lowercase, no `@`); the image is pushed as
+- Variable (or secret) `DOCKERHUB_NAMESPACE` – your Docker ID (lowercase, no `@`); the image is pushed as
   `<DOCKERHUB_NAMESPACE>/comfyui-cuda13`. Required if the login name is an email.
 - Variable `IMAGE_NAME` – optional, default `comfyui-cuda13`
 
