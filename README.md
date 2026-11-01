@@ -52,6 +52,28 @@ start it again from a pod shell:
 | `comfyui-start` | start ComfyUI (after it was stopped or crashed) |
 | `comfyui-restart` | stop it and start it again right away (e.g. after adding node packs) |
 | `comfyui-stop` | stop it, e.g. to run `python3 /opt/ComfyUI/main.py` by hand |
+| `comfyui-args` | show the flags ComfyUI runs with |
+
+### Extra startup flags
+
+`comfyui-start` and `comfyui-restart` accept ComfyUI flags. They are checked with ComfyUI's
+own option parser first, so a mistyped or unknown flag prints an error and nothing is
+restarted. The flags are kept for later restarts until you change them, and last until the
+pod restarts. For flags on every start, set `COMFY_ARGS` on the pod or template instead.
+
+```bash
+comfyui-restart --use-split-cross-attention     # restart with these extra flags
+comfyui-restart --novram --reserve-vram 2       # replace them with others
+comfyui-restart                                 # restart, same extra flags as before
+comfyui-restart --defaults                      # restart without extra flags
+comfyui-restart --help                          # list all flags (restarts nothing)
+```
+
+Some useful ones: `--novram`, `--highvram`, `--cpu`, `--reserve-vram GB`,
+`--use-split-cross-attention`, `--use-quad-cross-attention`, `--use-pytorch-cross-attention`,
+`--use-sage-attention`, `--use-flash-attention`, `--disable-dynamic-vram`, `--cache-none`.
+`--medvram` and `--normalvram` are Automatic1111 flags and don't exist in ComfyUI.
+`--lowvram` exists but does nothing while Dynamic VRAM is on (add `--disable-dynamic-vram`).
 
 ## File Browser
 

@@ -105,7 +105,8 @@ fi
 #   comfyui-stop      stop it (e.g. to run it by hand)
 STOP_FILE=/tmp/comfyui.stop          # present = stay stopped
 RESTART_FILE=/tmp/comfyui.restart    # present = start again right after exiting
-rm -f "$STOP_FILE" "$RESTART_FILE"
+ARGS_FILE=/tmp/comfyui.args          # extra flags from comfyui-start/-restart
+rm -f "$STOP_FILE" "$RESTART_FILE" "$ARGS_FILE"
 CHILD=0
 on_term() { [ "$CHILD" -gt 0 ] && kill -TERM "$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; exit 0; }
 trap on_term TERM INT
@@ -113,8 +114,12 @@ trap on_term TERM INT
 cd /opt/ComfyUI
 while true; do
   if [ -f "$STOP_FILE" ]; then sleep 2 & wait $!; continue; fi
+  # extra flags saved by comfyui-start / comfyui-restart (one per line)
+  EXTRA=()
+  [ -s "$ARGS_FILE" ] && mapfile -t EXTRA < "$ARGS_FILE"
+  echo "[entrypoint] ComfyUI flags: ${COMFY_ARGS:-} ${EXTRA[*]}"
   # shellcheck disable=SC2086  # COMFY_ARGS is intentionally word-split
-  python3 main.py --listen 0.0.0.0 --port 8188 --base-directory "$BASE" --models-directory "$MODELS" ${COMFY_ARGS:-} &
+  python3 main.py --listen 0.0.0.0 --port 8188 --base-directory "$BASE" --models-directory "$MODELS" ${COMFY_ARGS:-} "${EXTRA[@]}" &
   CHILD=$!
   RC=0; wait "$CHILD" || RC=$?
   CHILD=0

@@ -110,10 +110,8 @@ RUN python3 --version \
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 # Helper commands for the supervised ComfyUI process (see entrypoint.sh).
 # The pattern is anchored so it only matches ComfyUI itself, never a shell that mentions it.
-RUN printf '%s\n' '#!/bin/sh' 'touch /tmp/comfyui.restart' 'pkill -f "^python3 main.py --listen" || rm -f /tmp/comfyui.stop /tmp/comfyui.restart' 'echo "ComfyUI restarting"' > /usr/local/bin/comfyui-restart \
- && printf '%s\n' '#!/bin/sh' 'touch /tmp/comfyui.stop' 'rm -f /tmp/comfyui.restart' 'pkill -f "^python3 main.py --listen"' 'echo "ComfyUI stopped (comfyui-start to start it again)"' > /usr/local/bin/comfyui-stop \
- && printf '%s\n' '#!/bin/sh' 'rm -f /tmp/comfyui.stop' 'echo "ComfyUI starting"' > /usr/local/bin/comfyui-start \
- && chmod 755 /usr/local/bin/comfyui-restart /usr/local/bin/comfyui-stop /usr/local/bin/comfyui-start
+COPY --chmod=755 comfyui-ctl.sh /usr/local/bin/comfyui-ctl
+RUN for c in start restart stop args; do ln -s comfyui-ctl "/usr/local/bin/comfyui-$c"; done
 
 WORKDIR /opt/ComfyUI
 EXPOSE 22 8080 8188 8089
