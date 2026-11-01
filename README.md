@@ -1,7 +1,8 @@
 # comfyui-cuda13-runpod
 
 A clean ComfyUI image for RunPod: Debian 13 slim, Python 3.13, PyTorch for CUDA 13.0,
-File Browser, an optional `llama-server` (llama.cpp, CUDA 13, off by default), and SSH.
+File Browser, an optional `llama-server` (llama.cpp, CUDA 13, off by default), Node.js 24
+and npm (for front ends such as Mix Studio), nano, tmux and SSH.
 Nothing app-specific is baked in —
 node packs, models and outputs live on the network volume, so the image stays small and
 generic and the data survives pod restarts.

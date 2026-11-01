@@ -78,15 +78,21 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # python3-dev + build-essential stay: node packs on the volume can compile wheels at boot.
-# git: node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | libgomp1: llama
+# git: node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | libgomp1: llama | nano: editor
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git python3 python3-pip python3-dev build-essential \
-      ffmpeg libgl1 libglib2.0-0 libgomp1 openssh-server procps tmux tini \
+      ffmpeg libgl1 libglib2.0-0 libgomp1 nano openssh-server procps tmux tini \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /usr/lib/python3*/EXTERNALLY-MANAGED \
  && ln -sf /usr/bin/python3 /usr/local/bin/python \
  && rm -f /etc/ssh/ssh_host_* \
  && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/; s/^#\?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+
+# Node.js 24 from NodeSource (for ComfyUI front ends such as Mix Studio)
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && node --version && npm --version
 
 # File Browser: single static binary from its GitHub release
 RUN curl -fsSL "https://github.com/filebrowser/filebrowser/releases/download/${FILEBROWSER_VERSION}/linux-amd64-filebrowser.tar.gz" \
