@@ -39,20 +39,27 @@ if [ "${SKIP_NODE_DEPS:-0}" != 1 ]; then
   STAMP="$PYTHONUSERBASE/.node-reqs.sha"
   NEW=$(find "$BASE/custom_nodes" -maxdepth 2 -name requirements.txt -print0 | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)
   if [ "$NEW" != "$(cat "$STAMP" 2>/dev/null || true)" ]; then
-    echo "[entrypoint] node-pack requirements changed - installing into $PYTHONUSERBASE"
     LOG="$PYTHONUSERBASE/node-deps.log"; : > "$LOG"
+    echo "[entrypoint] node-pack requirements changed - installing into $PYTHONUSERBASE"
+    echo "[entrypoint] ComfyUI starts when this is done; pip output: tail -f $LOG"
+    PIP=(python3 -m pip install --user --no-warn-script-location)
+    ALL_START=$SECONDS
     for req in "$BASE"/custom_nodes/*/requirements.txt; do
       [ -f "$req" ] || continue
       pack=$(basename "$(dirname "$req")")
+      echo "  ...   $pack"
+      printf '\n===== %s (%s) =====\n' "$pack" "$(date '+%F %T')" >> "$LOG"
+      START=$SECONDS
       grep -iv '^dlib' "$req" > /tmp/req.txt    # dlib -> prebuilt dlib-bin wheel
-      if python3 -m pip install --user -q -r /tmp/req.txt >>"$LOG" 2>&1 \
-         || python3 -m pip install --user -q --no-build-isolation -r /tmp/req.txt >>"$LOG" 2>&1; then
-        echo "  ok    $pack"
+      if "${PIP[@]}" -r /tmp/req.txt >>"$LOG" 2>&1 \
+         || "${PIP[@]}" --no-build-isolation -r /tmp/req.txt >>"$LOG" 2>&1; then
+        echo "  ok    $pack ($((SECONDS - START))s)"
       else
-        echo "  FAIL  $pack (see $LOG)"
+        echo "  FAIL  $pack ($((SECONDS - START))s, see $LOG)"
       fi
-      grep -iq '^dlib' "$req" && { python3 -m pip install --user -q dlib-bin >>"$LOG" 2>&1 || echo "  FAIL  dlib-bin for $pack"; }
+      grep -iq '^dlib' "$req" && { "${PIP[@]}" dlib-bin >>"$LOG" 2>&1 || echo "  FAIL  dlib-bin for $pack"; }
     done
+    echo "[entrypoint] node-pack requirements done in $((SECONDS - ALL_START))s"
     echo "$NEW" > "$STAMP"
   fi
 fi
