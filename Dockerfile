@@ -121,5 +121,6 @@ RUN for c in start restart stop args; do ln -s comfyui-ctl "/usr/local/bin/comfy
 
 WORKDIR /opt/ComfyUI
 EXPOSE 22 8080 8188 8089
-# tini as PID 1: forwards stop signals and reaps exited child processes
-ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.sh"]
+# tini forwards stop signals and reaps exited child processes. -s (subreaper) keeps
+# reaping working when the platform starts tini as a child instead of PID 1 (RunPod does).
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/entrypoint.sh"]
