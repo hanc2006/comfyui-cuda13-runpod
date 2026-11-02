@@ -17,6 +17,7 @@ generic and the data survives pod restarts.
 | `/workspace/models` | volume | **models only** (`checkpoints`, `loras`, `vae`, `diffusion_models`, `text_encoders`, …) |
 | `/workspace/ComfyUI` | volume | `custom_nodes`, `input`, `output`, `user` |
 | `/workspace/.python` | volume | Python packages of the node packs in `custom_nodes` |
+| `/workspace/.ce` | volume | isolated Python envs that some node packs build with comfy-env (e.g. ComfyUI-SAM3) |
 | `/workspace/.filebrowser` | volume | File Browser settings, users and log |
 
 On every start the entrypoint creates any missing standard model folders (existing files are
