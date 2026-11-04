@@ -27,6 +27,9 @@ first start after adding packs is slow, later starts are fast. Install log:
 `/workspace/.python/node-deps.log`. Before installing it waits for the pod's DNS
 (up to `NET_WAIT` seconds), retries failed packs once, and marks the install done only when
 every pack installed, so a pack that failed (no network, say) is tried again on the next start.
+Packs built on comfy-env (e.g. ComfyUI-SAM3) also get their isolated env built in `/workspace/.ce`
+by running their `install.py` — once, and again only when their `comfy-env*.toml` changes. Log:
+`/workspace/.ce/install-<pack>.log`.
 
 ## Environment variables
 

@@ -100,6 +100,30 @@ if [ "${SKIP_NODE_DEPS:-0}" != 1 ]; then
       echo "[entrypoint] ${#FAILED[@]} pack(s) still failing - they are retried on the next start (see $LOG)"
     fi
   fi
+
+  # ---- comfy-env isolated envs (e.g. ComfyUI-SAM3) -> $COMFY_ENV_ROOT (persists on the volume) ----
+  # Packs built on comfy-env keep heavy deps in their own env, which only their install.py
+  # builds (ComfyUI-Manager would run it; packs copied to the volume never get that).
+  # Run it per pack when its comfy-env*.toml files changed; marked done only on success.
+  CE_ROOT="${COMFY_ENV_ROOT:-/workspace/.ce}"
+  mkdir -p "$CE_ROOT"
+  for inst in "$BASE"/custom_nodes/*/install.py; do
+    [ -f "$inst" ] && grep -q 'comfy_env' "$inst" || continue
+    dir=$(dirname "$inst"); pack=$(basename "$dir")
+    sum=$(find "$dir" -maxdepth 3 -name 'comfy-env*.toml' -print0 | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)
+    mark="$CE_ROOT/.installed-$pack"
+    [ "$sum" = "$(cat "$mark" 2>/dev/null || true)" ] && continue
+    CE_LOG="$CE_ROOT/install-$pack.log"
+    echo "[entrypoint] building the comfy-env env of $pack (first time can take minutes; log: $CE_LOG)"
+    START=$SECONDS
+    if (cd "$dir" && python3 install.py) > "$CE_LOG" 2>&1; then
+      echo "$sum" > "$mark"
+      echo "  ok    $pack env ($((SECONDS - START))s)"
+    else
+      rm -f "$mark"
+      echo "  FAIL  $pack env ($((SECONDS - START))s) - retried on the next start; see $CE_LOG"
+    fi
+  done
 fi
 
 # ---- File Browser (web file manager for /workspace, login required) ----
