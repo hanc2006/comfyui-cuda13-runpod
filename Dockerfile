@@ -75,7 +75,9 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
     COMFY_ENV_ROOT=/workspace/.ce \
     COMFY_BASE=/workspace/ComfyUI \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    PATH=/opt/llama:$PATH
+    PATH=/opt/llama:$PATH:/workspace/.python/bin
+# /workspace/.python/bin (last, so system tools win): commands that node packs' pip
+# installs bring, e.g. `uv`, which comfy-env runs to install CUDA wheels into its envs.
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # python3-dev + build-essential stay: node packs on the volume can compile wheels at boot.
