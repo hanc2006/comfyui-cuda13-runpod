@@ -24,7 +24,9 @@ On every start the entrypoint creates any missing standard model folders (existi
 never touched) and installs the node packs' `requirements.txt` into `/workspace/.python`
 **only when they changed** — the
 first start after adding packs is slow, later starts are fast. Install log:
-`/workspace/.python/node-deps.log`.
+`/workspace/.python/node-deps.log`. Before installing it waits for the pod's DNS
+(up to `NET_WAIT` seconds), retries failed packs once, and marks the install done only when
+every pack installed, so a pack that failed (no network, say) is tried again on the next start.
 
 ## Environment variables
 
@@ -34,6 +36,7 @@ first start after adding packs is slow, later starts are fast. Install log:
 | `COMFY_BASE` | `/workspace/ComfyUI` | custom_nodes / input / output / user |
 | `COMFY_ARGS` | – | extra ComfyUI flags, e.g. `--highvram` |
 | `SKIP_NODE_DEPS` | `0` | `1` = skip the node-pack requirements check |
+| `NET_WAIT` | `120` | seconds to wait for DNS (pypi.org, github.com) before installing node-pack requirements |
 | `FILEBROWSER_ENABLED` | `true` | `false` = don't start File Browser |
 | `FILEBROWSER_PASSWORD` | – | password for user `admin` (12+ characters). Unset: generated on first start and saved in `/workspace/.filebrowser/admin-password.txt` |
 | `LLAMA_ENABLED` | `false` | `true` = start `llama-server` on port 8089 (not started by default) |

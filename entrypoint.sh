@@ -7,6 +7,7 @@
 #   COMFY_MODELS      models only, kept apart from everything else (default /workspace/models)
 #   COMFY_ARGS        extra ComfyUI flags, e.g. "--highvram"
 #   SKIP_NODE_DEPS=1  skip the requirements check for volume node packs
+#   NET_WAIT          seconds to wait for DNS before installing them (default 120)
 #   FILEBROWSER_ENABLED   true (default) / false -> File Browser on :8080, root /workspace
 #   FILEBROWSER_PASSWORD  admin password (min 12 chars). Unset: one is generated on first
 #                         start and saved in /workspace/.filebrowser/admin-password.txt
@@ -42,25 +43,62 @@ if [ "${SKIP_NODE_DEPS:-0}" != 1 ]; then
     LOG="$PYTHONUSERBASE/node-deps.log"; : > "$LOG"
     echo "[entrypoint] node-pack requirements changed - installing into $PYTHONUSERBASE"
     echo "[entrypoint] ComfyUI starts when this is done; pip output: tail -f $LOG"
+
+    # The pod's DNS can take a few seconds after the container starts: wait for it
+    # (up to NET_WAIT seconds, default 120) instead of failing every install at once.
+    net_ready() { getent hosts pypi.org >/dev/null 2>&1 && getent hosts github.com >/dev/null 2>&1; }
+    WAITED=0
+    until net_ready || [ "$WAITED" -ge "${NET_WAIT:-120}" ]; do
+      [ "$WAITED" = 0 ] && echo "[entrypoint] waiting for DNS (pypi.org, github.com)..."
+      sleep 2; WAITED=$((WAITED + 2))
+    done
+    if net_ready; then
+      [ "$WAITED" -gt 0 ] && echo "[entrypoint] DNS ready after ${WAITED}s"
+    else
+      echo "[entrypoint] DNS still not resolving after ${WAITED}s - installing anyway; /etc/resolv.conf:"
+      sed 's/^/    /' /etc/resolv.conf || true
+    fi
+
     PIP=(python3 -m pip install --user --no-warn-script-location)
-    ALL_START=$SECONDS
-    for req in "$BASE"/custom_nodes/*/requirements.txt; do
-      [ -f "$req" ] || continue
+    install_pack() {   # $1 = requirements.txt; returns non-zero when anything failed
+      local req=$1 pack START rc=0
       pack=$(basename "$(dirname "$req")")
-      echo "  ...   $pack"
       printf '\n===== %s (%s) =====\n' "$pack" "$(date '+%F %T')" >> "$LOG"
       START=$SECONDS
-      grep -iv '^dlib' "$req" > /tmp/req.txt    # dlib -> prebuilt dlib-bin wheel
+      # dlib -> prebuilt dlib-bin wheel. `|| true`: grep exits 1 when no line is left (an
+      # empty requirements.txt, like rgthree-comfy's), which must not stop the container.
+      grep -iv '^dlib' "$req" > /tmp/req.txt || true
       if "${PIP[@]}" -r /tmp/req.txt >>"$LOG" 2>&1 \
          || "${PIP[@]}" --no-build-isolation -r /tmp/req.txt >>"$LOG" 2>&1; then
         echo "  ok    $pack ($((SECONDS - START))s)"
       else
-        echo "  FAIL  $pack ($((SECONDS - START))s, see $LOG)"
+        echo "  FAIL  $pack ($((SECONDS - START))s, see $LOG)"; rc=1
       fi
-      grep -iq '^dlib' "$req" && { "${PIP[@]}" dlib-bin >>"$LOG" 2>&1 || echo "  FAIL  dlib-bin for $pack"; }
+      if grep -iq '^dlib' "$req"; then "${PIP[@]}" dlib-bin >>"$LOG" 2>&1 || { echo "  FAIL  dlib-bin for $pack"; rc=1; }; fi
+      return $rc
+    }
+    ALL_START=$SECONDS
+    FAILED=()
+    for req in "$BASE"/custom_nodes/*/requirements.txt; do
+      [ -f "$req" ] || continue
+      echo "  ...   $(basename "$(dirname "$req")")"
+      install_pack "$req" || FAILED+=("$req")
     done
+    # One more try for the ones that failed (a network hiccup, a mirror that was slow).
+    if [ "${#FAILED[@]}" -gt 0 ]; then
+      echo "[entrypoint] retrying ${#FAILED[@]} failed pack(s) in 10s"
+      sleep 10
+      RETRY=("${FAILED[@]}"); FAILED=()
+      for req in "${RETRY[@]}"; do install_pack "$req" || FAILED+=("$req"); done
+    fi
     echo "[entrypoint] node-pack requirements done in $((SECONDS - ALL_START))s"
-    echo "$NEW" > "$STAMP"
+    # Marked done only when everything installed; otherwise the next start tries again.
+    if [ "${#FAILED[@]}" -eq 0 ]; then
+      echo "$NEW" > "$STAMP"
+    else
+      rm -f "$STAMP"
+      echo "[entrypoint] ${#FAILED[@]} pack(s) still failing - they are retried on the next start (see $LOG)"
+    fi
   fi
 fi
 
