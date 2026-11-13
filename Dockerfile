@@ -1,45 +1,25 @@
 # syntax=docker/dockerfile:1.7
 # Clean ComfyUI base image for RunPod — multi-stage, Debian 13 slim, Python 3.13, CUDA 13.
-# CUDA comes from PyTorch's own libs and the llama.cpp image's libs; the base has none.
-#  - Image (/opt): PyTorch, ComfyUI, llama-server, File Browser, SSH.
+# CUDA comes from PyTorch's own libs; the base has none.
+#  - Image (/opt): PyTorch, ComfyUI, File Browser, SSH.
 #  - Volume: /workspace/models = models only (--models-directory);
 #    /workspace/ComfyUI = custom_nodes, input, output, user (--base-directory).
 #    Node-pack Python deps go to /workspace/.python (pip --user), so they survive
 #    restarts. File Browser (:8080, login required) manages /workspace.
 #
 # Build: docker build --platform linux/amd64 -t <you>/comfyui-cuda13:1 .
-# Pod:   network volume at /workspace; expose 8188/http, 8080/http, 22/tcp (+ 8089/http for llama).
-#        Host driver must be CUDA 13.x (nvidia-smi). PyTorch is cu130; llama-server's
-#        libs are 13.4 and rely on CUDA 13 minor-version compatibility on 13.0-13.3 drivers.
-#        llama-server (port 8089) is off by default: LLAMA_ENABLED=true + LLAMA_ARG_MODEL.
+# Pod:   network volume at /workspace; expose 8188/http, 8080/http, 22/tcp.
+#        Host driver must be CUDA 13.x (nvidia-smi). PyTorch is cu130.
 
-# Official llama.cpp server image built for CUDA 13 (13.4.1 per llama.cpp's
-# .github/workflows/docker.yml). Its binaries + the CUDA libs they link to are copied
-# into the Debian runtime, so no compile and no CUDA install is needed here.
-# Pin it for reproducible builds: ghcr.io/ggml-org/llama.cpp:server-cuda13@sha256:<digest>
-ARG LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda13
 # PyTorch for CUDA 13.0. TORCH_VERSION empty = newest on the index; set e.g. 2.11.0 to pin
 # torch + torchaudio (torchvision follows torch automatically).
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=
 ARG COMFY_REF=master
 ARG FILEBROWSER_VERSION=v2.63.23
+ARG KOKON_IMAGE=ghcr.io/gabrielelozupone/kokon:0.12.1
 
-########## Stage 1: llama-server from the official CUDA 13 image ##########
-FROM ${LLAMA_IMAGE} AS llama
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-# The image lays llama-server and its ggml/llama *.so out flat under /app; that folder is
-# copied as-is below. A Debian base has no CUDA libs, so also collect the NVIDIA runtime
-# libs /app links to (cudart, cuBLAS, NCCL, ...), wherever this image keeps them.
-# libcuda.so.1 is the host driver (RunPod provides it) and is not copied.
-RUN mkdir -p /nvlibs \
- && LD_LIBRARY_PATH=/app ldd /app/llama-server /app/*.so* \
-      | grep -oE '=> /[^ ]+' | cut -c4- | grep -v stubs \
-      | grep -E '/lib(cudart|cublas|cublasLt|cufft|curand|cusolver|cusparse|nvrtc|nvJitLink|nvjitlink|nccl)[^/]*\.so[^/]*$' \
-      | sort -u | xargs -r -I{} cp -L {} /nvlibs/ \
- && ls /nvlibs
-
-########## Stage 2: build Python packages + ComfyUI (same Debian/Python as runtime) ##########
+########## Build Python packages + ComfyUI (same Debian/Python as runtime) ##########
 FROM debian:13-slim AS builder
 ARG TORCH_INDEX
 ARG TORCH_VERSION
@@ -65,8 +45,8 @@ RUN git clone --depth 1 --branch "${COMFY_REF}" https://github.com/comfyanonymou
  && python3 -m pip install -r /tmp/req.txt \
  && find /usr/local/lib/python3* /opt -name '__pycache__' -prune -exec rm -rf {} +
 
-########## Stage 3: runtime ##########
-FROM debian:13-slim
+########## Runtime ##########
+FROM debian:13-slim AS runtime
 ARG FILEBROWSER_VERSION
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
     PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore \
@@ -75,13 +55,13 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
     COMFY_ENV_ROOT=/workspace/.ce \
     COMFY_BASE=/workspace/ComfyUI \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    PATH=/opt/llama:$PATH:/workspace/.python/bin
+    PATH=$PATH:/workspace/.python/bin
 # /workspace/.python/bin (last, so system tools win): commands that node packs' pip
 # installs bring, e.g. `uv`, which comfy-env runs to install CUDA wheels into its envs.
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # python3-dev + build-essential stay: node packs on the volume can compile wheels at boot.
-# git: node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | libgomp1: llama | nano: editor
+# git: node packs | ffmpeg: video nodes | libgl1/libglib: OpenCV | nano: editor
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git python3 python3-pip python3-dev build-essential \
       ffmpeg libgl1 libglib2.0-0 libgomp1 nano openssh-server procps tmux tini \
@@ -106,16 +86,7 @@ RUN curl -fsSL "https://github.com/filebrowser/filebrowser/releases/download/${F
 COPY --from=builder /usr/local/lib /usr/local/lib
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /opt /opt
-# llama-server: the official image's /app as-is (binary + ggml/llama libs, flat), plus the
-# NVIDIA libs collected in stage 1. LD_LIBRARY_PATH=/opt/llama is set only for the
-# llama-server process (entrypoint.sh), so these libs never shadow PyTorch's own CUDA libs.
-COPY --from=llama /app/ /opt/llama/
-COPY --from=llama /nvlibs/ /opt/llama/
-# Report (don't fail on) any library llama-server still can't resolve; libcuda.so.1 is
-# expected to be missing at build time - the host driver provides it on the pod.
-RUN python3 --version \
- && { LD_LIBRARY_PATH=/opt/llama ldd /opt/llama/llama-server /opt/llama/*.so* 2>/dev/null | grep 'not found' | grep -v 'libcuda\.so' | sort -u \
-      | sed 's/^/WARNING llama-server missing: /' || true; }
+RUN python3 --version
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 # Helper commands for the supervised ComfyUI process (see entrypoint.sh).
 # The pattern is anchored so it only matches ComfyUI itself, never a shell that mentions it.
@@ -123,7 +94,24 @@ COPY --chmod=755 comfyui-ctl.sh /usr/local/bin/comfyui-ctl
 RUN for c in start restart stop args; do ln -s comfyui-ctl "/usr/local/bin/comfyui-$c"; done
 
 WORKDIR /opt/ComfyUI
-EXPOSE 22 8080 8188 8089
+EXPOSE 22 8080 8188
 # tini forwards stop signals and reaps exited child processes. -s (subreaper) keeps
 # reaping working when the platform starts tini as a child instead of PID 1 (RunPod does).
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/entrypoint.sh"]
+
+########## Optional image: add Kokon's published headless service ##########
+FROM ${KOKON_IMAGE} AS kokon-source
+
+FROM runtime AS kokon
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3t64 libvulkan1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --uid 1000 kokon
+COPY --from=kokon-source /usr/local/bin/kokon-service /usr/local/bin/kokon-service
+ENV KOKON_ENABLED=true KOKON_CONTAINER=1 \
+    QLS_DATA_DIR=/workspace/kokon/data \
+    QLS_CONFIG_DIR=/workspace/kokon/config \
+    QLS_OUTPUT_DIR=/workspace/kokon/gallery
+EXPOSE 39152
+
+# Default to the ComfyUI image for builds that do not specify --target.
+FROM runtime AS final
