@@ -15,6 +15,7 @@
 #   LLAMA_ARG_MODEL   path to the .gguf llama-server loads (required when enabled; API on :8089)
 #   LLAMA_ARG_*       any other llama-server option as env, e.g. LLAMA_ARG_CTX_SIZE=8192
 #   LLAMA_ARGS        extra llama-server flags, e.g. "--mmproj /workspace/models/llm/mmproj.gguf"
+#   KOKON_ENABLED     true in the Kokon image; false disables its browser service
 set -euo pipefail
 
 BASE="${COMFY_BASE:-/workspace/ComfyUI}"
@@ -162,6 +163,21 @@ if is_on "${LLAMA_ENABLED:-false}"; then
   else
     echo "[entrypoint] LLAMA_ARG_MODEL=$LLAMA_ARG_MODEL not found - llama-server not started"
   fi
+fi
+
+# ---- Optional Kokon browser service (included in the Kokon image only) ----
+if is_on "${KOKON_ENABLED:-false}"; then
+  if ! command -v kokon-service >/dev/null || ! id kokon >/dev/null 2>&1; then
+    echo "[entrypoint] KOKON_ENABLED is on but Kokon is not installed in this image" >&2
+    exit 1
+  fi
+  : "${QLS_DATA_DIR:?QLS_DATA_DIR must be set}"
+  : "${QLS_CONFIG_DIR:?QLS_CONFIG_DIR must be set}"
+  : "${QLS_OUTPUT_DIR:?QLS_OUTPUT_DIR must be set}"
+  mkdir -p "$QLS_DATA_DIR" "$QLS_CONFIG_DIR" "$QLS_OUTPUT_DIR"
+  chown kokon:kokon "$QLS_DATA_DIR" "$QLS_CONFIG_DIR" "$QLS_OUTPUT_DIR"
+  echo "[entrypoint] Kokon on :39152 (log $QLS_DATA_DIR/kokon-service.log)"
+  runuser -u kokon -- kokon-service --persistent --remote > "$QLS_DATA_DIR/kokon-service.log" 2>&1 &
 fi
 
 # ---- ComfyUI, supervised ----

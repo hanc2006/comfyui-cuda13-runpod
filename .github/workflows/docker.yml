@@ -15,7 +15,7 @@ name: Build and push image
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, .github/workflows/docker.yml]
+    paths: [Dockerfile, entrypoint.sh, comfyui-ctl.sh, .github/workflows/docker.yml]
   workflow_dispatch:
     inputs:
       torch_version:
@@ -66,10 +66,13 @@ jobs:
           IMAGE="${NAMESPACE}/${NAME}"
           echo "Image: ${IMAGE}"
           echo "tags=${IMAGE}:latest,${IMAGE}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "kokon_tags=${IMAGE}-kokon:latest,${IMAGE}-kokon:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push ComfyUI image
+        uses: docker/build-push-action@v6
         with:
           context: .
+          target: runtime
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -78,3 +81,16 @@ jobs:
             COMFY_REF=${{ github.event.inputs.comfy_ref || 'master' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push Kokon image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: kokon
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.kokon_tags }}
+          build-args: |
+            TORCH_VERSION=${{ github.event.inputs.torch_version || '' }}
+            COMFY_REF=${{ github.event.inputs.comfy_ref || 'master' }}
+          cache-from: type=gha

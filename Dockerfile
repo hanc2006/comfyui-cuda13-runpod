@@ -24,6 +24,7 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=
 ARG COMFY_REF=master
 ARG FILEBROWSER_VERSION=v2.63.23
+ARG KOKON_IMAGE=ghcr.io/gabrielelozupone/kokon:0.12.1
 
 ########## Stage 1: llama-server from the official CUDA 13 image ##########
 FROM ${LLAMA_IMAGE} AS llama
@@ -66,7 +67,7 @@ RUN git clone --depth 1 --branch "${COMFY_REF}" https://github.com/comfyanonymou
  && find /usr/local/lib/python3* /opt -name '__pycache__' -prune -exec rm -rf {} +
 
 ########## Stage 3: runtime ##########
-FROM debian:13-slim
+FROM debian:13-slim AS runtime
 ARG FILEBROWSER_VERSION
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 \
     PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore \
@@ -127,3 +128,20 @@ EXPOSE 22 8080 8188 8089
 # tini forwards stop signals and reaps exited child processes. -s (subreaper) keeps
 # reaping working when the platform starts tini as a child instead of PID 1 (RunPod does).
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/entrypoint.sh"]
+
+########## Optional image: add Kokon's published headless service ##########
+FROM ${KOKON_IMAGE} AS kokon-source
+
+FROM runtime AS kokon
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3t64 libvulkan1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --uid 1000 kokon
+COPY --from=kokon-source /usr/local/bin/kokon-service /usr/local/bin/kokon-service
+ENV KOKON_ENABLED=true KOKON_CONTAINER=1 \
+    QLS_DATA_DIR=/workspace/kokon/data \
+    QLS_CONFIG_DIR=/workspace/kokon/config \
+    QLS_OUTPUT_DIR=/workspace/kokon/gallery
+EXPOSE 39152
+
+# Preserve the original image for builds that do not specify --target.
+FROM runtime AS final

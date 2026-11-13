@@ -7,6 +7,10 @@ Nothing app-specific is baked in —
 node packs, models and outputs live on the network volume, so the image stays small and
 generic and the data survives pod restarts.
 
+There is also a separate `comfyui-cuda13-kokon` image with the headless
+[Kokon](https://github.com/GabrieleLozupone/kokon) browser application. The original image
+does not include or start Kokon.
+
 ## What lives where
 
 | Path | Where | Contents |
@@ -19,6 +23,7 @@ generic and the data survives pod restarts.
 | `/workspace/.python` | volume | Python packages of the node packs in `custom_nodes` |
 | `/workspace/.ce` | volume | isolated Python envs that some node packs build with comfy-env (e.g. ComfyUI-SAM3) |
 | `/workspace/.filebrowser` | volume | File Browser settings, users and log |
+| `/workspace/kokon` | volume | Kokon data, configuration and saved images (Kokon image only) |
 
 On every start the entrypoint creates any missing standard model folders (existing files are
 never touched) and installs the node packs' `requirements.txt` into `/workspace/.python`
@@ -46,7 +51,36 @@ by running their `install.py` — once, and again only when their `comfy-env*.to
 | `LLAMA_ARG_MODEL` | – | `.gguf` to load, e.g. `/workspace/models/llm/model.gguf` (required when enabled) |
 | `LLAMA_ARG_*` | – | any llama-server option, e.g. `LLAMA_ARG_CTX_SIZE=8192` |
 | `LLAMA_ARGS` | – | extra flags, e.g. `--mmproj /workspace/models/llm/mmproj.gguf --api-key <secret>` |
+| `KOKON_ENABLED` | `true` in Kokon image | `false` = don't start Kokon |
 | `PUBLIC_KEY` | set by RunPod | SSH key for `root` (password login is disabled) |
+
+## Kokon image
+
+Use `<dockerhub-user>/comfyui-cuda13-kokon:latest` and expose `39152/http` in addition
+to the usual RunPod ports. Kokon starts alongside ComfyUI and shares the GPU; running
+both may exhaust GPU memory. Kokon downloads its own engine and model during setup
+(allow at least 15 GB on the `/workspace` volume); it does not automatically use
+ComfyUI's models.
+
+RunPod supplies the NVIDIA driver and GPU devices from the host via the NVIDIA container
+runtime; the image does not install a driver. `nvidia-smi` in the pod should show the GPU.
+Kokon's setup downloads its CUDA 12.8 engine and CUDA runtime libraries separately; the
+CUDA 13-capable host driver is backward-compatible with them.
+
+Set a browser password from a pod shell (at least 8 characters):
+
+```bash
+runuser -u kokon -- kokon-service --set-password
+```
+
+Open the RunPod HTTP proxy URL for port `39152`, sign in, and complete Kokon's setup.
+The password is required before remote access is enabled and persists in
+`/workspace/kokon/data`. Settings are in `/workspace/kokon/config`, saved images in
+`/workspace/kokon/gallery`, and startup output in `/workspace/kokon/data/kokon-service.log`.
+The service runs as UID 1000; these folders must be writable by that user. The local
+token API on port `39151` must not be exposed. Kokon itself serves plain HTTP, so use
+RunPod's HTTPS proxy or another secure connection rather than exposing it directly to
+the internet. See [Kokon's Docker guide](https://github.com/GabrieleLozupone/kokon/blob/master/docs/docker.md).
 
 ## Starting and stopping ComfyUI
 
@@ -95,7 +129,8 @@ replaces the current password on the next start.
 
 - **Image:** `<dockerhub-user>/comfyui-cuda13:latest`
 - **Ports:** `8188/http` (ComfyUI), `8080/http` (File Browser), `22/tcp` (SSH), plus
-  `8089/http` only if llama-server must be reachable from outside
+  `8089/http` only if llama-server must be reachable from outside. For Kokon use the
+  `comfyui-cuda13-kokon` image and add `39152/http`.
 - **Volume:** network volume mounted at `/workspace`
 - **GPU filter:** CUDA 13.x drivers. PyTorch is built for CUDA 13.0; llama.cpp's CUDA 13
   image uses 13.4 libraries and relies on CUDA 13 minor-version compatibility on older 13.x
@@ -121,14 +156,16 @@ Pushing to `main` builds and pushes the image with GitHub Actions
   `<DOCKERHUB_NAMESPACE>/comfyui-cuda13`. Required if the login name is an email.
 - Variable `IMAGE_NAME` – optional, default `comfyui-cuda13`
 
-Tags pushed: `latest` and the short commit SHA. The workflow can also be started by hand
+Both `<namespace>/<IMAGE_NAME>` and `<namespace>/<IMAGE_NAME>-kokon` are pushed with
+`latest` and short commit SHA tags. The workflow can also be started by hand
 (**Actions → Build and push image → Run workflow**) with an optional torch version pin and
 ComfyUI ref.
 
 Local build:
 
 ```bash
-docker buildx build --platform linux/amd64 -t <dockerhub-user>/comfyui-cuda13:latest --push .
+docker buildx build --platform linux/amd64 --target runtime -t <dockerhub-user>/comfyui-cuda13:latest --push .
+docker buildx build --platform linux/amd64 --target kokon -t <dockerhub-user>/comfyui-cuda13-kokon:latest --push .
 ```
 
 ### Build arguments
@@ -140,3 +177,4 @@ docker buildx build --platform linux/amd64 -t <dockerhub-user>/comfyui-cuda13:la
 | `TORCH_VERSION` | empty (newest) | pin torch + torchaudio, e.g. `2.11.0` |
 | `COMFY_REF` | `master` | ComfyUI branch or tag |
 | `FILEBROWSER_VERSION` | `v2.63.23` | File Browser release |
+| `KOKON_IMAGE` | `ghcr.io/gabrielelozupone/kokon:0.12.1` | published Kokon image supplying `kokon-service`; pin with `@sha256:<digest>` |
