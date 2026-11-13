@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Container start: SSH -> volume layout -> node-pack deps -> File Browser -> llama-server -> ComfyUI (supervised).
+# Container start: SSH -> volume layout -> node-pack deps -> File Browser -> Kokon -> ComfyUI (supervised).
 #
 # Env options:
 #   COMFY_BASE        ComfyUI data on the volume: custom_nodes, input, output, user
@@ -11,10 +11,6 @@
 #   FILEBROWSER_ENABLED   true (default) / false -> File Browser on :8080, root /workspace
 #   FILEBROWSER_PASSWORD  admin password (min 12 chars). Unset: one is generated on first
 #                         start and saved in /workspace/.filebrowser/admin-password.txt
-#   LLAMA_ENABLED     1/true/yes/on -> start llama-server (default: off, not started)
-#   LLAMA_ARG_MODEL   path to the .gguf llama-server loads (required when enabled; API on :8089)
-#   LLAMA_ARG_*       any other llama-server option as env, e.g. LLAMA_ARG_CTX_SIZE=8192
-#   LLAMA_ARGS        extra llama-server flags, e.g. "--mmproj /workspace/models/llm/mmproj.gguf"
 #   KOKON_ENABLED     true in the Kokon image; false disables its browser service
 set -euo pipefail
 
@@ -150,21 +146,6 @@ if is_on "${FILEBROWSER_ENABLED:-true}"; then
   fi
 fi
 
-# ---- Optional llama-server (shares the GPU with ComfyUI) ----
-if is_on "${LLAMA_ENABLED:-false}"; then
-  if [ -z "${LLAMA_ARG_MODEL:-}" ]; then
-    echo "[entrypoint] LLAMA_ENABLED is on but LLAMA_ARG_MODEL is empty - llama-server not started"
-  elif [ -f "$LLAMA_ARG_MODEL" ]; then
-    export LLAMA_ARG_HOST="${LLAMA_ARG_HOST:-0.0.0.0}" LLAMA_ARG_PORT="${LLAMA_ARG_PORT:-8089}" \
-           LLAMA_ARG_N_GPU_LAYERS="${LLAMA_ARG_N_GPU_LAYERS:-999}"
-    echo "[entrypoint] llama-server: $LLAMA_ARG_MODEL on :$LLAMA_ARG_PORT (log /workspace/llama-server.log)"
-    # shellcheck disable=SC2086  # LLAMA_ARGS is intentionally word-split
-    LD_LIBRARY_PATH=/opt/llama llama-server ${LLAMA_ARGS:-} > /workspace/llama-server.log 2>&1 &
-  else
-    echo "[entrypoint] LLAMA_ARG_MODEL=$LLAMA_ARG_MODEL not found - llama-server not started"
-  fi
-fi
-
 # ---- Optional Kokon browser service (included in the Kokon image only) ----
 if is_on "${KOKON_ENABLED:-false}"; then
   if ! command -v kokon-service >/dev/null || ! id kokon >/dev/null 2>&1; then
@@ -183,7 +164,7 @@ fi
 # ---- ComfyUI, supervised ----
 # This script stays the container's main process and runs ComfyUI as a child, so
 # stopping/crashing ComfyUI no longer stops the container (SSH, File Browser and
-# llama-server keep running). ComfyUI is NOT restarted automatically: when it exits
+# Kokon keep running when enabled). ComfyUI is NOT restarted automatically: when it exits
 # it stays stopped until one of these commands is run inside the pod:
 #   comfyui-start     start it again
 #   comfyui-restart   stop it and start it again right away

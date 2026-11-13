@@ -1,8 +1,7 @@
 # comfyui-cuda13-runpod
 
 A clean ComfyUI image for RunPod: Debian 13 slim, Python 3.13, PyTorch for CUDA 13.0,
-File Browser, an optional `llama-server` (llama.cpp, CUDA 13, off by default), Node.js 24
-and npm (for front ends such as Mix Studio), nano, tmux and SSH.
+File Browser, Node.js 24 and npm (for front ends such as Mix Studio), nano, tmux and SSH.
 Nothing app-specific is baked in —
 node packs, models and outputs live on the network volume, so the image stays small and
 generic and the data survives pod restarts.
@@ -11,12 +10,14 @@ There is also a separate `comfyui-cuda13-kokon` image with the headless
 [Kokon](https://github.com/GabrieleLozupone/kokon) browser application. The original image
 does not include or start Kokon.
 
+`llama-server` and its `LLAMA_*` settings have been removed from both images. Existing
+model files on the volume are not deleted.
+
 ## What lives where
 
 | Path | Where | Contents |
 |---|---|---|
 | `/opt/ComfyUI` | image | ComfyUI code |
-| `/opt/llama` | image | `llama-server` with its libs (the official `server-cuda13` image's `/app`) + the NVIDIA libs it links to |
 | `/usr/local/bin/filebrowser` | image | File Browser |
 | `/workspace/models` | volume | **models only** (`checkpoints`, `loras`, `vae`, `diffusion_models`, `text_encoders`, …) |
 | `/workspace/ComfyUI` | volume | `custom_nodes`, `input`, `output`, `user` |
@@ -47,10 +48,6 @@ by running their `install.py` — once, and again only when their `comfy-env*.to
 | `NET_WAIT` | `120` | seconds to wait for DNS (pypi.org, github.com) before installing node-pack requirements |
 | `FILEBROWSER_ENABLED` | `true` | `false` = don't start File Browser |
 | `FILEBROWSER_PASSWORD` | – | password for user `admin` (12+ characters). Unset: generated on first start and saved in `/workspace/.filebrowser/admin-password.txt` |
-| `LLAMA_ENABLED` | `false` | `true` = start `llama-server` on port 8089 (not started by default) |
-| `LLAMA_ARG_MODEL` | – | `.gguf` to load, e.g. `/workspace/models/llm/model.gguf` (required when enabled) |
-| `LLAMA_ARG_*` | – | any llama-server option, e.g. `LLAMA_ARG_CTX_SIZE=8192` |
-| `LLAMA_ARGS` | – | extra flags, e.g. `--mmproj /workspace/models/llm/mmproj.gguf --api-key <secret>` |
 | `KOKON_ENABLED` | `true` in Kokon image | `false` = don't start Kokon |
 | `PUBLIC_KEY` | set by RunPod | SSH key for `root` (password login is disabled) |
 
@@ -85,7 +82,7 @@ the internet. See [Kokon's Docker guide](https://github.com/GabrieleLozupone/kok
 ## Starting and stopping ComfyUI
 
 ComfyUI runs as a child process of the container's startup script, so stopping or
-crashing it does **not** stop the container: SSH, File Browser and llama-server keep
+crashing it does **not** stop the container: SSH, File Browser and Kokon (if enabled) keep
 running. It is **not** restarted automatically — after it exits it stays stopped until you
 start it again from a pod shell:
 
@@ -128,13 +125,10 @@ replaces the current password on the next start.
 ## RunPod template
 
 - **Image:** `<dockerhub-user>/comfyui-cuda13:latest`
-- **Ports:** `8188/http` (ComfyUI), `8080/http` (File Browser), `22/tcp` (SSH), plus
-  `8089/http` only if llama-server must be reachable from outside. For Kokon use the
+- **Ports:** `8188/http` (ComfyUI), `8080/http` (File Browser), `22/tcp` (SSH). For Kokon use the
   `comfyui-cuda13-kokon` image and add `39152/http`.
 - **Volume:** network volume mounted at `/workspace`
-- **GPU filter:** CUDA 13.x drivers. PyTorch is built for CUDA 13.0; llama.cpp's CUDA 13
-  image uses 13.4 libraries and relies on CUDA 13 minor-version compatibility on older 13.x
-  drivers — if `llama-server` fails with a CUDA error, pick hosts with CUDA ≥ 13.4.
+- **GPU filter:** CUDA 13.x drivers. PyTorch is built for CUDA 13.0.
 
 ## Moving an existing install to this layout
 
@@ -172,7 +166,6 @@ docker buildx build --platform linux/amd64 --target kokon -t <dockerhub-user>/co
 
 | Arg | Default | Purpose |
 |---|---|---|
-| `LLAMA_IMAGE` | `ghcr.io/ggml-org/llama.cpp:server-cuda13` | source of `llama-server`; pin with `@sha256:<digest>` |
 | `TORCH_INDEX` | `https://download.pytorch.org/whl/cu130` | PyTorch wheel index |
 | `TORCH_VERSION` | empty (newest) | pin torch + torchaudio, e.g. `2.11.0` |
 | `COMFY_REF` | `master` | ComfyUI branch or tag |
