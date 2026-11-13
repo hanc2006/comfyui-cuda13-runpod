@@ -26,6 +26,11 @@ on:
         description: "ComfyUI branch or tag"
         required: false
         default: "master"
+      image:
+        description: "Image to build"
+        type: choice
+        options: [both, kokon, comfyui]
+        default: both
 
 concurrency:
   group: docker-${{ github.ref }}
@@ -69,6 +74,7 @@ jobs:
           echo "kokon_tags=${IMAGE}-kokon:latest,${IMAGE}-kokon:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ComfyUI image
+        if: github.event.inputs.image != 'kokon'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -83,6 +89,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Kokon image
+        if: github.event.inputs.image != 'comfyui'
         uses: docker/build-push-action@v6
         with:
           context: .
