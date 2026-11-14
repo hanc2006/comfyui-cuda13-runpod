@@ -133,7 +133,7 @@ if is_on "${FILEBROWSER_ENABLED:-true}"; then
     PW="${FILEBROWSER_PASSWORD:-$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)}"
     fb config init && fb users add admin "$PW" --perm.admin \
       || { echo "[entrypoint] File Browser setup failed (password must be 12+ chars)"; rm -f "$FB_DB"; }
-    [ -z "${FILEBROWSER_PASSWORD:-}" ] && [ -f "$FB_DB" ] && { umask 077; echo "$PW" > "$FB_PWFILE"; \
+    [ -z "${FILEBROWSER_PASSWORD:-}" ] && [ -f "$FB_DB" ] && { (umask 077; echo "$PW" > "$FB_PWFILE"); \
       echo "[entrypoint] File Browser admin password generated: see $FB_PWFILE"; }
   elif [ -n "${FILEBROWSER_PASSWORD:-}" ]; then
     fb users update admin --password "$FILEBROWSER_PASSWORD" && rm -f "$FB_PWFILE" \
@@ -156,7 +156,27 @@ if is_on "${KOKON_ENABLED:-false}"; then
   : "${QLS_CONFIG_DIR:?QLS_CONFIG_DIR must be set}"
   : "${QLS_OUTPUT_DIR:?QLS_OUTPUT_DIR must be set}"
   mkdir -p "$QLS_DATA_DIR" "$QLS_CONFIG_DIR" "$QLS_OUTPUT_DIR"
+  # Older starts could create this parent as root with mode 700.
+  if [ "$QLS_DATA_DIR" = /workspace/kokon/data ] \
+     || [ "$QLS_CONFIG_DIR" = /workspace/kokon/config ] \
+     || [ "$QLS_OUTPUT_DIR" = /workspace/kokon/gallery ]; then
+    chown kokon:kokon /workspace/kokon
+    chmod u+rwx /workspace/kokon
+  fi
   chown kokon:kokon "$QLS_DATA_DIR" "$QLS_CONFIG_DIR" "$QLS_OUTPUT_DIR"
+  chmod u+rwx "$QLS_DATA_DIR" "$QLS_CONFIG_DIR" "$QLS_OUTPUT_DIR"
+  mkdir -p "$QLS_DATA_DIR/logs"
+  chown kokon:kokon "$QLS_DATA_DIR/logs"
+  chmod u+rwx "$QLS_DATA_DIR/logs"
+  for log in "$QLS_DATA_DIR/logs/service.log" "$QLS_DATA_DIR/logs/service.prev.log"; do
+    if [ -f "$log" ] && [ ! -L "$log" ]; then chown kokon:kokon "$log"; chmod u+rw "$log"; fi
+  done
+  for dir in "$QLS_DATA_DIR" "$QLS_CONFIG_DIR" "$QLS_OUTPUT_DIR" "$QLS_DATA_DIR/logs"; do
+    if ! runuser -u kokon -- test -w "$dir" || ! runuser -u kokon -- test -x "$dir"; then
+      echo "[entrypoint] Kokon cannot access $dir; check ownership and parent directory permissions" >&2
+      exit 1
+    fi
+  done
   echo "[entrypoint] Kokon on :39152 (log $QLS_DATA_DIR/kokon-service.log)"
   runuser -u kokon -- kokon-service --persistent --remote > "$QLS_DATA_DIR/kokon-service.log" 2>&1 &
 fi
