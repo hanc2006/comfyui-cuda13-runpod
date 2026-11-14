@@ -15,7 +15,7 @@ name: Build and push image
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, comfyui-ctl.sh, .github/workflows/docker.yml]
+    paths: [Dockerfile, entrypoint.sh, comfyui-ctl.sh, tests/kokon-permissions.sh, .github/workflows/docker.yml]
   workflow_dispatch:
     inputs:
       torch_version:
@@ -49,6 +49,9 @@ jobs:
           df -h /
 
       - uses: actions/checkout@v4
+
+      - name: Test Kokon volume permissions
+        run: bash tests/kokon-permissions.sh
 
       - uses: docker/setup-buildx-action@v3
 

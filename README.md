@@ -79,6 +79,10 @@ token API on port `39151` must not be exposed. Kokon itself serves plain HTTP, s
 RunPod's HTTPS proxy or another secure connection rather than exposing it directly to
 the internet. See [Kokon's Docker guide](https://github.com/GabrieleLozupone/kokon/blob/master/docs/docker.md).
 
+If an older image created `/workspace/kokon` with root-only permissions, the updated
+entrypoint repairs the default Kokon directory and log permissions on the next pod start.
+For custom `QLS_*_DIR` locations, ensure every parent directory is traversable by UID 1000.
+
 ## Starting and stopping ComfyUI
 
 ComfyUI runs as a child process of the container's startup script, so stopping or
