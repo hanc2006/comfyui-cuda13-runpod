@@ -40,6 +40,10 @@ RUN if [ -n "${TORCH_VERSION}" ]; then PKGS=("torch==${TORCH_VERSION}" torchvisi
  && cat /opt/torch-constraints.txt
 ENV PIP_CONSTRAINT=/opt/torch-constraints.txt
 
+# SageAttention 1 uses the Triton already installed with CUDA PyTorch, without nvcc.
+RUN python3 -m pip install --no-deps sageattention==1.0.6 \
+ && python3 -c 'from sageattention import sageattn; assert callable(sageattn)'
+
 RUN git clone --depth 1 --branch "${COMFY_REF}" https://github.com/comfyanonymous/ComfyUI /opt/ComfyUI \
  && grep -viE '^(torch|torchvision|torchaudio)([<>=~! ]|$)' /opt/ComfyUI/requirements.txt > /tmp/req.txt \
  && python3 -m pip install -r /tmp/req.txt \

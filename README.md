@@ -2,6 +2,7 @@
 
 A clean ComfyUI image for RunPod: Debian 13 slim, Python 3.13, PyTorch for CUDA 13.0,
 File Browser, Node.js 24 and npm (for front ends such as Mix Studio), nano, tmux and SSH.
+SageAttention 1.0.6 is included for the optional `--use-sage-attention` flag.
 Nothing app-specific is baked in —
 node packs, models and outputs live on the network volume, so the image stays small and
 generic and the data survives pod restarts.
@@ -117,6 +118,14 @@ Some useful ones: `--novram`, `--highvram`, `--cpu`, `--reserve-vram GB`,
 `--use-sage-attention`, `--use-flash-attention`, `--disable-dynamic-vram`, `--cache-none`.
 `--medvram` and `--normalvram` are Automatic1111 flags and don't exist in ComfyUI.
 `--lowvram` exists but does nothing while Dynamic VRAM is on (add `--disable-dynamic-vram`).
+
+### SageAttention
+
+Start ComfyUI with `comfyui-restart --use-sage-attention`, or set
+`COMFY_ARGS=--use-sage-attention` on the pod for every start. The image includes
+SageAttention 1 (Triton), not SageAttention 2 or 3. Its upstream project notes it is
+optimized for RTX 3090 and 4090; performance and GPU compatibility vary. ComfyUI can
+fall back to PyTorch attention if a SageAttention operation fails.
 
 ## File Browser
 
